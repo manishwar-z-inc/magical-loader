@@ -23,7 +23,7 @@ const UserProfile: React.FC = () => {
         bio: "Enthusiastic developer and designer.",
       });
       setLoading(false);
-    }, 3000);
+    }, 6000);
   }, []);
 
   return (

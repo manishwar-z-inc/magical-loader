@@ -20,22 +20,23 @@ const placeholderMapping: Record<string, string> = {
   h4: "skeleton-h4 w-[55%] my-2", // Default h4 margins
   h5: "skeleton-h5 w-[50%] my-1", // Default h5 margins
   h6: "skeleton-h6 w-[45%] my-1", // Default h6 margins
-  p: "skeleton-p w-[80%] my-3", // Default paragraph margins
+  p: "skeleton-p w-[80%] my-3",    // Default paragraph margins
   span: "skeleton-span w-[40%]",
   label: "skeleton-label w-[40%]",
 };
 
-let transformCache = new WeakMap<object, ReactNode>();
-
 /**
  * Recursively transforms a node into its skeleton version.
  *
- * It accumulates parent's classes (lowercased) and if any of them include "text-center",
- * text nodes will be rendered with inline styles forcing center alignment.
+ * Custom components (non-DOM elements) are skipped.
+ * We wrap the transformation of children in try/catch blocks to avoid errors.
  */
-function transformNode(node: ReactNode, parentClasses: string = ""): ReactNode {
-  console.log(node);
-  // Handle text nodes first
+function transformNode(
+  node: ReactNode,
+  parentClasses: string = "",
+  cache: WeakMap<object, ReactNode>
+): ReactNode {
+  // Handle text nodes
   if (typeof node === "string" || typeof node === "number") {
     const isCentered = parentClasses.includes("text-center");
     return (
@@ -47,13 +48,17 @@ function transformNode(node: ReactNode, parentClasses: string = ""): ReactNode {
     );
   }
 
-  if (isValidElement<ExtendedElementProps>(node)) {
-    console.log("valid", node);
-    if (transformCache.has(node)) {
-      return transformCache.get(node)!;
+  if (isValidElement(node)) {
+    if (cache.has(node)) {
+      return cache.get(node)!;
     }
 
-    const { className = "", style, children } = node.props;
+    // Skip transformation for custom components
+    if (node.type !== React.Fragment && typeof node.type !== "string") {
+      return node;
+    }
+
+    const { className = "", style, children } = node.props as ExtendedElementProps;
     const currentClasses = className;
     const isCentered =
       currentClasses.includes("text-center") ||
@@ -61,8 +66,20 @@ function transformNode(node: ReactNode, parentClasses: string = ""): ReactNode {
 
     let result: ReactNode;
 
-    // Handle image elements
-    if (node.type === "img") {
+    // Handle React fragments
+    if (node.type === React.Fragment) {
+      let newChildren;
+      try {
+        newChildren = React.Children.map(children, (child) =>
+          transformNode(child, currentClasses, cache)
+        );
+      } catch (e) {
+        newChildren = children;
+      }
+      result = <>{newChildren}</>;
+    }
+    // Handle image elements by returning a placeholder div
+    else if (node.type === "img") {
       result = (
         <div
           className={`${className} skeleton-item skeleton-img ${
@@ -77,39 +94,39 @@ function transformNode(node: ReactNode, parentClasses: string = ""): ReactNode {
       (children === null ||
         children === undefined ||
         (typeof children === "string" && children.trim() === "")) &&
-      typeof node.type === "string" &&
-      placeholderMapping[node.type]
+      placeholderMapping[node.type as string]
     ) {
       result = (
         <div
-          // Include original className to preserve margins
           className={`${className} skeleton-item ${
-            placeholderMapping[node.type]
+            placeholderMapping[node.type as string]
           } ${isCentered ? "mx-auto" : ""}`}
         />
       );
     }
-    // Handle elements with children
+    // Handle other DOM elements with children
     else {
-      const newChildren = React.Children.map(children, (child) =>
-        transformNode(child, currentClasses)
-      );
-      result = cloneElement(
-        node,
-        {
-          className: `${className}`,
-          style,
-        },
-        newChildren
-      );
+      let newChildren;
+      try {
+        newChildren = React.Children.map(children, (child) =>
+          transformNode(child, currentClasses, cache)
+        );
+      } catch (e) {
+        newChildren = children;
+      }
+      try {
+        result = cloneElement(node as React.ReactElement<any>, { className, style }, newChildren);
+      } catch (e) {
+        result = node;
+      }
     }
 
-    transformCache.set(node, result);
+    cache.set(node, result);
     return result;
   }
 
   if (Array.isArray(node)) {
-    return node.map((child) => transformNode(child, parentClasses));
+    return node.map((child) => transformNode(child, parentClasses, cache));
   }
 
   return node;
@@ -120,8 +137,9 @@ const MagicalSkeletonLoader: React.FC<MagicalSkeletonLoaderProps> = ({
   children,
 }) => {
   const skeletonContent = useMemo(() => {
-    transformCache = new WeakMap(); // Reset cache on children change
-    return transformNode(children);
+    // Create a fresh cache for each render
+    const localCache = new WeakMap<object, ReactNode>();
+    return transformNode(children, "", localCache);
   }, [children]);
 
   if (!loading) {

@@ -23,7 +23,7 @@ const ArticleCard: React.FC = () => {
           "Delve into the mysteries of space, from distant galaxies to the secrets of black holes.",
       });
       setLoading(false);
-    }, 3000);
+    }, 6000);
   }, []);
 
   return (
